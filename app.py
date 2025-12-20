@@ -1,139 +1,220 @@
 import os
 import logging
 import requests
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+from pathlib import Path
+from datetime import datetime
 
-# 1. Загружаем настройки
-load_dotenv()
+# --- 1. НАСТРОЙКИ И БЕЗОПАСНОСТЬ ---
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
-
-# Константы из .env
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "buisness2026")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERSION = "v21.0"
 
-# --- ФУНКЦИИ ОТПРАВКИ (ТВОЙ ИНСТРУМЕНТАРИЙ) ---
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+
+# --- 2. ПОДКЛЮЧЕНИЕ GOOGLE SHEETS ---
+try:
+    SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_name('google_sheet.json', SCOPE)
+    client = gspread.authorize(creds)
+    sheet = client.open('BarberBot Leads').sheet1 # <--- ПРОВЕРЬ ИМЯ ТАБЛИЦЫ!
+    print("✅ Google Sheets подключен успешно!")
+except Exception as e:
+    print(f"❌ Ошибка Google Sheets: {e}")
+
+# --- 3. ПАМЯТЬ БОТА (ВРЕМЕННАЯ) ---
+# user_state хранит этап диалога: 'MENU', 'WAIT_NAME', 'WAIT_SERVICE', 'WAIT_TIME'
+user_state = {} 
+# user_data хранит ответы: {'phone': {'name': 'Yossi', 'service': 'Hair'}}
+user_data = {}
+
+# --- 4. ФУНКЦИИ ОТПРАВКИ ---
 
 def send_message(recipient_id, text):
-    """Отправляет текстовое сообщение"""
+    """Отправляет простой текст"""
     url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     data = {
         "messaging_product": "whatsapp",
         "to": recipient_id,
         "type": "text",
         "text": {"body": text}
     }
-    response = requests.post(url, headers=headers, json=data)
-    return response
+    requests.post(url, headers=headers, json=data)
 
-def send_reply_button(recipient_id, text, buttons):
-    """
-    Отправляет кнопки.
-    buttons = [{"id": "btn1", "title": "Button 1"}]
-    """
+def send_menu_buttons(recipient_id):
+    """Отправляет главное меню"""
     url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     
-    # Формируем структуру кнопок для Meta
-    action_buttons = []
-    for btn in buttons:
-        action_buttons.append({
-            "type": "reply",
-            "reply": {
-                "id": btn["id"],
-                "title": btn["title"]
-            }
-        })
-
     data = {
         "messaging_product": "whatsapp",
         "to": recipient_id,
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": text},
-            "action": {"buttons": action_buttons}
+            "body": {"text": "💈 Добро пожаловать в BarberBot! Чем помочь?"},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": "btn_book", "title": "✂️ Записаться"}},
+                    {"type": "reply", "reply": {"id": "btn_price", "title": "💰 Прайс"}},
+                    {"type": "reply", "reply": {"id": "btn_loc", "title": "📍 Где мы?"}}
+                ]
+            }
         }
     }
     requests.post(url, headers=headers, json=data)
 
-# --- СЕРВЕРНАЯ ЧАСТЬ ---
+def send_service_selection(recipient_id):
+    """Отправляет выбор услуг (списком или кнопками)"""
+    url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    
+    # Для простоты используем кнопки (максимум 3)
+    data = {
+        "messaging_product": "whatsapp",
+        "to": recipient_id,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": "Какая услуга вас интересует?"},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": "srv_hair", "title": "Стрижка"}},
+                    {"type": "reply", "reply": {"id": "srv_beard", "title": "Борода"}},
+                    {"type": "reply", "reply": {"id": "srv_combo", "title": "Комплекс"}}
+                ]
+            }
+        }
+    }
+    requests.post(url, headers=headers, json=data)
+
+def save_lead_to_sheet(phone, data):
+    """Записывает лид в таблицу"""
+    try:
+        timestamp = datetime.now().strftime("%d-%m-%Y %H:%M")
+        row = [
+            timestamp,              # Дата заявки
+            data.get('name', ''),   # Имя
+            phone,                  # Телефон
+            data.get('service', ''),# Услуга
+            data.get('time', '')    # Желаемое время
+        ]
+        sheet.append_row(row)
+        print(f"📝 Заявка сохранена: {row}")
+    except Exception as e:
+        print(f"❌ Ошибка записи в таблицу: {e}")
+
+# --- 5. ОБРАБОТЧИК СООБЩЕНИЙ ---
 
 @app.route("/", methods=["GET"])
 def home():
-    return "BarberBot Meta Server is Running! 🚀", 200
+    return "BarberBot Brain is Active! 🧠", 200
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    # === 1. ВЕРИФИКАЦИЯ (META ПРОВЕРЯЕТ НАС) ===
+    # 1. Verify
     if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
+        if request.args.get("hub.verify_token") == VERIFY_TOKEN:
+            return request.args.get("hub.challenge"), 200
+        return "Forbidden", 403
 
-        if mode and token:
-            if mode == "subscribe" and token == VERIFY_TOKEN:
-                logging.info("WEBHOOK_VERIFIED")
-                return challenge, 200
-            else:
-                return "Forbidden", 403
-
-    # === 2. ОБРАБОТКА СООБЩЕНИЙ (КЛИЕНТ ПИШЕТ НАМ) ===
+    # 2. Handle Messages
     if request.method == "POST":
         data = request.json
-        # Логируем входящий JSON (полезно для отладки)
-        # logging.info(f"Received: {data}")
-
         try:
-            # Проверяем структуру JSON от Meta
             if data.get("object") == "whatsapp_business_account":
                 for entry in data.get("entry", []):
                     for change in entry.get("changes", []):
-                        value = change.get("value", {})
+                        val = change.get("value", {})
                         
-                        # Если есть сообщение
-                        if "messages" in value:
-                            message = value["messages"][0]
-                            sender_id = message["from"] # Номер телефона клиента
+                        if "messages" in val:
+                            msg = val["messages"][0]
+                            sender = msg["from"]
+                            msg_type = msg["type"]
                             
-                            # --- ЛОГИКА БОТА ---
+                            # Получаем текущее состояние пользователя (или MENU если нет)
+                            state = user_state.get(sender, 'MENU')
                             
-                            # 1. Если пришел ТЕКСТ
-                            if message["type"] == "text":
-                                text_body = message["text"]["body"].lower()
-                                print(f"📩 Текст от {sender_id}: {text_body}")
+                            # --- ЛОГИКА "СБРОСА" ---
+                            # Если клиент пишет "старт" или "меню" — сбрасываем всё
+                            text_body = ""
+                            if msg_type == "text":
+                                text_body = msg["text"]["body"].lower()
+                            
+                            if text_body in ["start", "menu", "старт", "меню", "привет"]:
+                                user_state[sender] = 'MENU'
+                                user_data[sender] = {}
+                                send_menu_buttons(sender)
+                                return jsonify({"status": "ok"}), 200
 
-                                if text_body in ["hi", "hello", "привет", "шалом", "start"]:
-                                    # Отправляем меню кнопками
-                                    btns = [
-                                        {"id": "btn_price", "title": "💰 Прайс"},
-                                        {"id": "btn_address", "title": "📍 Адрес"}
-                                    ]
-                                    send_reply_button(sender_id, "Шалом! Выберите действие:", btns)
+                            # --- КОНЕЧНЫЙ АВТОМАТ (FSM) ---
+                            
+                            if state == 'MENU':
+                                # Обработка кнопок главного меню
+                                if msg_type == "interactive":
+                                    btn_id = msg["interactive"]["button_reply"]["id"]
+                                    
+                                    if btn_id == "btn_price":
+                                        send_message(sender, "💵 Стрижка: 80₪\n🧔 Борода: 40₪\n🔥 Комплекс: 100₪")
+                                        send_menu_buttons(sender) # Возвращаем меню
+                                        
+                                    elif btn_id == "btn_loc":
+                                        send_message(sender, "📍 Мы находимся: Dizengoff 100, Tel Aviv")
+                                        send_menu_buttons(sender)
+                                        
+                                    elif btn_id == "btn_book":
+                                        send_message(sender, "Отлично! Как к вам обращаться? (Напишите имя)")
+                                        user_state[sender] = 'WAIT_NAME' # Переходим на след. шаг
+
+                            elif state == 'WAIT_NAME':
+                                if msg_type == "text":
+                                    name = msg["text"]["body"]
+                                    user_data[sender] = {'name': name} # Запомнили имя
+                                    
+                                    send_service_selection(sender) # Спрашиваем услугу
+                                    user_state[sender] = 'WAIT_SERVICE'
                                 else:
-                                    # Эхо-ответ
-                                    send_message(sender_id, f"Вы написали: {text_body}")
+                                    send_message(sender, "Пожалуйста, напишите ваше имя текстом.")
 
-                            # 2. Если нажали КНОПКУ
-                            elif message["type"] == "interactive":
-                                btn_id = message["interactive"]["button_reply"]["id"]
-                                print(f"🔘 Кнопка от {sender_id}: {btn_id}")
+                            elif state == 'WAIT_SERVICE':
+                                if msg_type == "interactive":
+                                    srv_id = msg["interactive"]["button_reply"]["title"] # Берем текст кнопки
+                                    user_data[sender]['service'] = srv_id # Запомнили услугу
+                                    
+                                    send_message(sender, "На когда вы хотите записаться? (Например: 'Завтра в 18:00')")
+                                    user_state[sender] = 'WAIT_TIME'
+                                else:
+                                    send_message(sender, "Пожалуйста, выберите услугу, нажав на кнопку.")
 
-                                if btn_id == "btn_price":
-                                    send_message(sender_id, "Стрижка: 80 ILS\nБорода: 40 ILS")
-                                elif btn_id == "btn_address":
-                                    send_message(sender_id, "Мы на Дизенгоф 100, Тель-Авив.")
+                            elif state == 'WAIT_TIME':
+                                if msg_type == "text":
+                                    time_slot = msg["text"]["body"]
+                                    user_data[sender]['time'] = time_slot # Запомнили время
+                                    
+                                    # ФИНАЛ: Сохраняем и подтверждаем
+                                    save_lead_to_sheet(sender, user_data[sender])
+                                    
+                                    final_text = (
+                                        f"✅ Заявка принята!\n"
+                                        f"👤 {user_data[sender]['name']}\n"
+                                        f"✂️ {user_data[sender]['service']}\n"
+                                        f"🕒 {time_slot}\n\n"
+                                        f"Мастер скоро свяжется для подтверждения."
+                                    )
+                                    send_message(sender, final_text)
+                                    
+                                    # Сброс в начало
+                                    user_state[sender] = 'MENU'
+                                    user_data[sender] = {}
 
         except Exception as e:
             logging.error(f"Error: {e}")

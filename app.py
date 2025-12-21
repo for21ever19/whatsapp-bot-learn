@@ -66,17 +66,17 @@ def send_main_menu(recipient_id):
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": "מעולה! איזה טיפול תרצה?"},
+            "body": {"text": "💈 *ברוכים הבאים ל-Barbershop!* 💈\nאיך אפשר לעזור לך היום?"},
             "action": {
                 "buttons": [
-                    # WhatsApp ограничивает длину заголовка кнопки 20 символами, пишем коротко
-                    {"type": "reply", "reply": {"id": "srv_hair", "title": "✂️ תספורת - 80₪"}},
-                    {"type": "reply", "reply": {"id": "srv_beard", "title": "🧔 זקן - 40₪"}},
-                    {"type": "reply", "reply": {"id": "srv_combo", "title": "👑 הכל כלול - 100₪"}}
+                    {"type": "reply", "reply": {"id": "btn_book", "title": "📅 לקבוע תור"}},
+                    {"type": "reply", "reply": {"id": "btn_price", "title": "💰 מחיר"}},
+                    {"type": "reply", "reply": {"id": "btn_loc", "title": "📍 כתובת"}}
                 ]
             }
         }
     }
+
     requests.post(url, headers=headers, json=data)
 
 def send_location(recipient_id):
@@ -108,12 +108,13 @@ def send_service_selection(recipient_id):
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": "💈 *ברוכים הבאים ל-Barbershop!* 💈\nאיך אפשר לעזור לך היום?"},
+            "body": {"text": "מעולה! איזה טיפול תרצה?"},
             "action": {
                 "buttons": [
-                    {"type": "reply", "reply": {"id": "btn_book", "title": "📅 לקבוע תור"}},
-                    {"type": "reply", "reply": {"id": "btn_price", "title": "💰 מחיר"}},
-                    {"type": "reply", "reply": {"id": "btn_loc", "title": "📍 כתובת"}}
+                    # WhatsApp ограничивает длину заголовка кнопки 20 символами, пишем коротко
+                    {"type": "reply", "reply": {"id": "srv_hair", "title": "✂️ תספורת - 80₪"}},
+                    {"type": "reply", "reply": {"id": "srv_beard", "title": "🧔 זקן - 40₪"}},
+                    {"type": "reply", "reply": {"id": "srv_combo", "title": "👑 הכל כלול - 100₪"}}
                 ]
             }
         }

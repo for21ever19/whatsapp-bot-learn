@@ -134,7 +134,7 @@ def save_lead(phone, data):
 def home():
     return "BarberBot Pro is Live 🇮🇱", 200
 
-app.route("/webhook", methods=["GET", "POST"])
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     # 1. VERIFY (Проверка токена)
     if request.method == "GET":

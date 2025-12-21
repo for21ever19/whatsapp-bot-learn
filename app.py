@@ -108,12 +108,12 @@ def send_service_selection(recipient_id):
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": "מעולה! איזה טיפול תרצה?"},
+            "body": {"text": "💈 *ברוכים הבאים ל-Barbershop!* 💈\nאיך אפשר לעזור לך היום?"},
             "action": {
                 "buttons": [
-                    {"type": "reply", "reply": {"id": "srv_hair", "title": "✂️ תספורת גבר"}},
-                    {"type": "reply", "reply": {"id": "srv_beard", "title": "🧔 עיצוב זקן"}},
-                    {"type": "reply", "reply": {"id": "srv_combo", "title": "👑 הכל כלול"}}
+                    {"type": "reply", "reply": {"id": "btn_book", "title": "📅 לקבוע תור"}},
+                    {"type": "reply", "reply": {"id": "btn_price", "title": "💰 מחיר"}},
+                    {"type": "reply", "reply": {"id": "btn_loc", "title": "📍 כתובת"}}
                 ]
             }
         }
@@ -134,13 +134,15 @@ def save_lead(phone, data):
 def home():
     return "BarberBot Pro is Live 🇮🇱", 200
 
-@app.route("/webhook", methods=["GET", "POST"])
+app.route("/webhook", methods=["GET", "POST"])
 def webhook():
+    # 1. VERIFY (Проверка токена)
     if request.method == "GET":
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge"), 200
         return "Forbidden", 403
 
+    # 2. POST (Обработка сообщений)
     if request.method == "POST":
         data = request.json
         try:
@@ -153,24 +155,27 @@ def webhook():
                             sender = msg["from"]
                             msg_type = msg["type"]
                             
-                            # Определяем текст сообщения для команд сброса
+                            # Получаем текст (если это текст)
                             text_body = ""
                             if msg_type == "text":
                                 text_body = msg["text"]["body"].lower()
 
-                            # СБРОС (Reset)
-                            if text_body in ["start", "menu", "hi", "היי", "שלום", "התחל", "תפריט"]:
+                            # --- 1. ГЛОБАЛЬНЫЙ СБРОС (Emergency Exit) ---
+                            # Если клиент хочет начать сначала, неважно где он был
+                            reset_words = ["start", "menu", "reset", "התחל", "תפריט", "home"]
+                            if text_body in reset_words:
                                 user_state[sender] = 'MENU'
                                 user_data[sender] = {}
                                 send_main_menu(sender)
                                 return jsonify({"status": "ok"}), 200
 
-                            # FSM
+                            # --- 2. ОПРЕДЕЛЯЕМ СОСТОЯНИЕ ---
                             state = user_state.get(sender, 'MENU')
 
-                            # 1. ГЛАВНОЕ МЕНЮ
+                            # --- ЛОГИКА ГЛАВНОГО МЕНЮ ---
                             if state == 'MENU':
                                 if msg_type == "interactive":
+                                    # Если нажали кнопку - обрабатываем
                                     btn_id = msg["interactive"]["button_reply"]["id"]
                                     
                                     if btn_id == "btn_price":
@@ -178,18 +183,19 @@ def webhook():
                                         send_main_menu(sender)
                                     
                                     elif btn_id == "btn_loc":
-                                        # Отправляем карту вместо текста
                                         send_location(sender)
-                                        # И следом меню, чтобы бот не молчал
                                         send_main_menu(sender)
 
                                     elif btn_id == "btn_book":
                                         send_message(sender, "בשמחה! איך קוראים לך? (כתוב את השם)")
                                         user_state[sender] = 'WAIT_NAME'
                                 else:
-                                    # Fallback: Если прислали текст вместо нажатия кнопки
-                                    send_message(sender, "סליחה, אני רק רובוט 🤖\nאנא בחר אפשרות מהתפריט למטה 👇")
+                                    # 🔥 UX FIX: Если прислали ЛЮБОЙ текст (шалом, привет, хочу стричься)
+                                    # Мы не ругаем клиента. Мы просто показываем ему меню.
+                                    # Это создает ощущение, что бот "понял" приветствие и предложил опции.
                                     send_main_menu(sender)
+
+                            # --- ЛОГИКА ЗАПИСИ (FSM) ---
 
                             # 2. ЖДЕМ ИМЯ
                             elif state == 'WAIT_NAME':

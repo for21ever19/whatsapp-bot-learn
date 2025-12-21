@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask, request, jsonify
@@ -11,6 +12,18 @@ from datetime import datetime
 # --- 1. НАСТРОЙКИ И БЕЗОПАСНОСТЬ ---
 env_path = Path(__file__).parent / '.env'
 load_dotenv(dotenv_path=env_path)
+
+
+# 🛠 МАГИЯ ДЛЯ RENDER: Восстанавливаем json-файл из переменной
+if not os.path.exists('google_sheet.json'):
+    # Если файла нет (мы на сервере), создаем его из переменной окружения
+    json_content = os.getenv("GOOGLE_SHEET_JSON_CONTENT")
+    if json_content:
+        with open('google_sheet.json', 'w') as f:
+            f.write(json_content)
+        print("✅ Файл google_sheet.json восстановлен из переменной!")
+    else:
+        print("⚠️ ВНИМАНИЕ: Нет файла google_sheet.json и нет переменной!")
 
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "buisness2026")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")

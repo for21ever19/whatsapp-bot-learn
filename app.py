@@ -1,29 +1,24 @@
 import os
 import logging
 import requests
-import json
 import gspread
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime
 
-# --- 1. НАСТРОЙКИ И БЕЗОПАСНОСТЬ ---
+# --- 1. НАСТРОЙКИ ---
 env_path = Path(__file__).parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
-
-# 🛠 МАГИЯ ДЛЯ RENDER: Восстанавливаем json-файл из переменной
+# Магия для Render (восстановление JSON)
 if not os.path.exists('google_sheet.json'):
-    # Если файла нет (мы на сервере), создаем его из переменной окружения
     json_content = os.getenv("GOOGLE_SHEET_JSON_CONTENT")
     if json_content:
         with open('google_sheet.json', 'w') as f:
             f.write(json_content)
-        print("✅ Файл google_sheet.json восстановлен из переменной!")
-    else:
-        print("⚠️ ВНИМАНИЕ: Нет файла google_sheet.json и нет переменной!")
 
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "buisness2026")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
@@ -33,26 +28,23 @@ VERSION = "v21.0"
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# --- 2. ПОДКЛЮЧЕНИЕ GOOGLE SHEETS ---
+# --- 2. GOOGLE SHEETS ---
 try:
     SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_name('google_sheet.json', SCOPE)
     client = gspread.authorize(creds)
-    sheet = client.open('BarberBot Leads').sheet1 # <--- ПРОВЕРЬ ИМЯ ТАБЛИЦЫ!
-    print("✅ Google Sheets подключен успешно!")
+    sheet = client.open('BarberBot Leads').sheet1
+    print("✅ CRM подключена!")
 except Exception as e:
-    print(f"❌ Ошибка Google Sheets: {e}")
+    print(f"❌ Ошибка CRM: {e}")
 
-# --- 3. ПАМЯТЬ БОТА (ВРЕМЕННАЯ) ---
-# user_state хранит этап диалога: 'MENU', 'WAIT_NAME', 'WAIT_SERVICE', 'WAIT_TIME'
+# --- 3. СОСТОЯНИЕ ---
 user_state = {} 
-# user_data хранит ответы: {'phone': {'name': 'Yossi', 'service': 'Hair'}}
 user_data = {}
 
-# --- 4. ФУНКЦИИ ОТПРАВКИ ---
+# --- 4. ФУНКЦИИ ОТПРАВКИ (HEBREW) ---
 
 def send_message(recipient_id, text):
-    """Отправляет простой текст"""
     url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     data = {
@@ -63,8 +55,8 @@ def send_message(recipient_id, text):
     }
     requests.post(url, headers=headers, json=data)
 
-def send_menu_buttons(recipient_id):
-    """Отправляет главное меню"""
+def send_main_menu(recipient_id):
+    """Выбор услуг с ценами"""
     url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     
@@ -74,73 +66,81 @@ def send_menu_buttons(recipient_id):
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": "💈 Добро пожаловать в BarberBot! Чем помочь?"},
+            "body": {"text": "מעולה! איזה טיפול תרצה?"},
             "action": {
                 "buttons": [
-                    {"type": "reply", "reply": {"id": "btn_book", "title": "✂️ Записаться"}},
-                    {"type": "reply", "reply": {"id": "btn_price", "title": "💰 Прайс"}},
-                    {"type": "reply", "reply": {"id": "btn_loc", "title": "📍 Где мы?"}}
+                    # WhatsApp ограничивает длину заголовка кнопки 20 символами, пишем коротко
+                    {"type": "reply", "reply": {"id": "srv_hair", "title": "✂️ תספורת - 80₪"}},
+                    {"type": "reply", "reply": {"id": "srv_beard", "title": "🧔 זקן - 40₪"}},
+                    {"type": "reply", "reply": {"id": "srv_combo", "title": "👑 הכל כלול - 100₪"}}
                 ]
             }
         }
     }
     requests.post(url, headers=headers, json=data)
 
+def send_location(recipient_id):
+    """Отправляет точку на карте"""
+    url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    
+    data = {
+        "messaging_product": "whatsapp",
+        "to": recipient_id,
+        "type": "location",
+        "location": {
+            "latitude": 32.0783,   # Координаты Дизенгоф 100
+            "longitude": 34.7736,
+            "name": "King David Cuts",
+            "address": "Dizengoff St 100, Tel Aviv-Yafo"
+        }
+    }
+    requests.post(url, headers=headers, json=data)
+    
 def send_service_selection(recipient_id):
-    """Отправляет выбор услуг (списком или кнопками)"""
+    """Выбор услуг"""
     url = f"https://graph.facebook.com/{VERSION}/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     
-    # Для простоты используем кнопки (максимум 3)
     data = {
         "messaging_product": "whatsapp",
         "to": recipient_id,
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": "Какая услуга вас интересует?"},
+            "body": {"text": "מעולה! איזה טיפול תרצה?"},
             "action": {
                 "buttons": [
-                    {"type": "reply", "reply": {"id": "srv_hair", "title": "Стрижка"}},
-                    {"type": "reply", "reply": {"id": "srv_beard", "title": "Борода"}},
-                    {"type": "reply", "reply": {"id": "srv_combo", "title": "Комплекс"}}
+                    {"type": "reply", "reply": {"id": "srv_hair", "title": "✂️ תספורת גבר"}},
+                    {"type": "reply", "reply": {"id": "srv_beard", "title": "🧔 עיצוב זקן"}},
+                    {"type": "reply", "reply": {"id": "srv_combo", "title": "👑 הכל כלול"}}
                 ]
             }
         }
     }
     requests.post(url, headers=headers, json=data)
 
-def save_lead_to_sheet(phone, data):
-    """Записывает лид в таблицу"""
+def save_lead(phone, data):
     try:
         timestamp = datetime.now().strftime("%d-%m-%Y %H:%M")
-        row = [
-            timestamp,              # Дата заявки
-            data.get('name', ''),   # Имя
-            phone,                  # Телефон
-            data.get('service', ''),# Услуга
-            data.get('time', '')    # Желаемое время
-        ]
+        row = [timestamp, data.get('name', ''), phone, data.get('service', ''), data.get('time', '')]
         sheet.append_row(row)
-        print(f"📝 Заявка сохранена: {row}")
     except Exception as e:
-        print(f"❌ Ошибка записи в таблицу: {e}")
+        print(f"Error saving: {e}")
 
-# --- 5. ОБРАБОТЧИК СООБЩЕНИЙ ---
+# --- 5. ЛОГИКА ---
 
 @app.route("/", methods=["GET"])
 def home():
-    return "BarberBot Brain is Active! 🧠", 200
+    return "BarberBot Pro is Live 🇮🇱", 200
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    # 1. Verify
     if request.method == "GET":
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge"), 200
         return "Forbidden", 403
 
-    # 2. Handle Messages
     if request.method == "POST":
         data = request.json
         try:
@@ -148,86 +148,87 @@ def webhook():
                 for entry in data.get("entry", []):
                     for change in entry.get("changes", []):
                         val = change.get("value", {})
-                        
                         if "messages" in val:
                             msg = val["messages"][0]
                             sender = msg["from"]
                             msg_type = msg["type"]
                             
-                            # Получаем текущее состояние пользователя (или MENU если нет)
-                            state = user_state.get(sender, 'MENU')
-                            
-                            # --- ЛОГИКА "СБРОСА" ---
-                            # Если клиент пишет "старт" или "меню" — сбрасываем всё
+                            # Определяем текст сообщения для команд сброса
                             text_body = ""
                             if msg_type == "text":
                                 text_body = msg["text"]["body"].lower()
-                            
-                            if text_body in ["start", "menu", "старт", "меню", "привет"]:
+
+                            # СБРОС (Reset)
+                            if text_body in ["start", "menu", "hi", "היי", "שלום", "התחל", "תפריט"]:
                                 user_state[sender] = 'MENU'
                                 user_data[sender] = {}
-                                send_menu_buttons(sender)
+                                send_main_menu(sender)
                                 return jsonify({"status": "ok"}), 200
 
-                            # --- КОНЕЧНЫЙ АВТОМАТ (FSM) ---
-                            
+                            # FSM
+                            state = user_state.get(sender, 'MENU')
+
+                            # 1. ГЛАВНОЕ МЕНЮ
                             if state == 'MENU':
-                                # Обработка кнопок главного меню
                                 if msg_type == "interactive":
                                     btn_id = msg["interactive"]["button_reply"]["id"]
                                     
                                     if btn_id == "btn_price":
-                                        send_message(sender, "💵 Стрижка: 80₪\n🧔 Борода: 40₪\n🔥 Комплекс: 100₪")
-                                        send_menu_buttons(sender) # Возвращаем меню
-                                        
+                                        send_message(sender, "💵 *המחירון שלנו:*\n\n✂️ תספורת: ₪80\n🧔 זקן: ₪40\n👑 הכל כלול: ₪100")
+                                        send_main_menu(sender)
+                                    
                                     elif btn_id == "btn_loc":
-                                        send_message(sender, "📍 Мы находимся: Dizengoff 100, Tel Aviv")
-                                        send_menu_buttons(sender)
-                                        
-                                    elif btn_id == "btn_book":
-                                        send_message(sender, "Отлично! Как к вам обращаться? (Напишите имя)")
-                                        user_state[sender] = 'WAIT_NAME' # Переходим на след. шаг
+                                        # Отправляем карту вместо текста
+                                        send_location(sender)
+                                        # И следом меню, чтобы бот не молчал
+                                        send_main_menu(sender)
 
+                                    elif btn_id == "btn_book":
+                                        send_message(sender, "בשמחה! איך קוראים לך? (כתוב את השם)")
+                                        user_state[sender] = 'WAIT_NAME'
+                                else:
+                                    # Fallback: Если прислали текст вместо нажатия кнопки
+                                    send_message(sender, "סליחה, אני רק רובוט 🤖\nאנא בחר אפשרות מהתפריט למטה 👇")
+                                    send_main_menu(sender)
+
+                            # 2. ЖДЕМ ИМЯ
                             elif state == 'WAIT_NAME':
                                 if msg_type == "text":
-                                    name = msg["text"]["body"]
-                                    user_data[sender] = {'name': name} # Запомнили имя
-                                    
-                                    send_service_selection(sender) # Спрашиваем услугу
+                                    user_data[sender] = {'name': msg["text"]["body"]}
+                                    send_service_selection(sender)
                                     user_state[sender] = 'WAIT_SERVICE'
                                 else:
-                                    send_message(sender, "Пожалуйста, напишите ваше имя текстом.")
+                                    send_message(sender, "בבקשה כתוב את השם שלך כהודעה.")
 
+                            # 3. ЖДЕМ УСЛУГУ
                             elif state == 'WAIT_SERVICE':
                                 if msg_type == "interactive":
-                                    srv_id = msg["interactive"]["button_reply"]["title"] # Берем текст кнопки
-                                    user_data[sender]['service'] = srv_id # Запомнили услугу
-                                    
-                                    send_message(sender, "На когда вы хотите записаться? (Например: 'Завтра в 18:00')")
+                                    user_data[sender]['service'] = msg["interactive"]["button_reply"]["title"]
+                                    send_message(sender, "באיזה יום ושעה היה נוח לך להגיע? 🗓️\n(לדוגמה: יום שלישי בבוקר או חמישי ב-18:00)")                                    
                                     user_state[sender] = 'WAIT_TIME'
                                 else:
-                                    send_message(sender, "Пожалуйста, выберите услугу, нажав на кнопку.")
+                                    send_message(sender, "אנא בחר שירות מהכפתורים 👇")
 
+                            # 4. ЖДЕМ ВРЕМЯ
                             elif state == 'WAIT_TIME':
                                 if msg_type == "text":
-                                    time_slot = msg["text"]["body"]
-                                    user_data[sender]['time'] = time_slot # Запомнили время
+                                    user_data[sender]['time'] = msg["text"]["body"]
                                     
-                                    # ФИНАЛ: Сохраняем и подтверждаем
-                                    save_lead_to_sheet(sender, user_data[sender])
+                                    # Финал
+                                    save_lead(sender, user_data[sender])
                                     
-                                    final_text = (
-                                        f"✅ Заявка принята!\n"
-                                        f"👤 {user_data[sender]['name']}\n"
-                                        f"✂️ {user_data[sender]['service']}\n"
-                                        f"🕒 {time_slot}\n\n"
-                                        f"Мастер скоро свяжется для подтверждения."
+                                    summary = (
+                                        f"✅ *התור נקבע בהצלחה!*\n\n"
+                                        f"👤 שם: {user_data[sender]['name']}\n"
+                                        f"✂️ טיפול: {user_data[sender]['service']}\n"
+                                        f"🕒 זמן: {user_data[sender]['time']}\n\n"
+                                        f"נתראה בקרוב! 👋"
                                     )
-                                    send_message(sender, final_text)
+                                    send_message(sender, summary)
                                     
-                                    # Сброс в начало
                                     user_state[sender] = 'MENU'
                                     user_data[sender] = {}
+                                    send_main_menu(sender) # Возвращаем меню для нового круга
 
         except Exception as e:
             logging.error(f"Error: {e}")
